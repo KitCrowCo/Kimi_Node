@@ -1,0 +1,129 @@
+services:
+  lightrag:
+#    image: ghcr.io/hkuds/lightrag:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lightrag-${KNOWLEDGE_DOMAIN_1}
+    ports:
+      - "${KNOWLEDGE_DOMAIN_1_PORT}:9621"
+    volumes:
+      - ~/docker-shared/knowledge:/app/data
+    environment:
+      - HOST=0.0.0.0
+      - WORKING_DIR=/app/data/rag_storage
+      - INPUT_DIR=/app/data/inputs
+      - LIGHTRAG_RUNTIME_TARGET=compose
+      - SUMMARY_LANGUAGE=English
+      - WEBUI_TITLE='${KNOWLEDGE_DOMAIN_1} KB'
+      - WEBUI_DESCRIPTION='Simple and Fast Graph Based RAG System'
+      - WORKERS=1
+      - TIMEOUT=0
+      #- CORS_ORIGINS=http://localhost:3000,http://localhost:8080 # only enabled for an explicit allow list, never for the "*" wildcard.
+
+      ### WORKSPACE sets workspace name for all storage types for the purpose of isolating data from LightRAG instances. (Valid workspace name constraints: a-z, A-Z, 0-9, and _)
+      - WORKSPACE=${KNOWLEDGE_DOMAIN_1}
+
+      ### Gloabal LLM Configuration
+      - LLM_TIMEOUT=6000 # LLM request timeout setting for all llm (0 means no timeout for Ollama)
+      - LLM_BINDING=ollama
+      - LLM_BINDING_HOST=${OLLAMA_LR_DOMAIN_1}
+      - LLM_BINDING_API_KEY=any_dummy_string_for_local
+      - LLM_MODEL=${LIGHTRAG_LLM}
+      - MAX_ASYNC_LLM=1 # Max concurrency requests of LLM - MAX_ASYNC is still accepted as a deprecated alias
+      - OLLAMA_LLM_NUM_CTX=16384 # OLLAMA_LLM_NUM_CTX must be provided, and should at least larger than MAX_TOTAL_TOKENS + 2000
+      - OLLAMA_LLM_TEMPERATURE=0.1
+      #- OLLAMA_LLM_NUM_PREDICT=9000
+      #- OLLAMA_LLM_STOP='["</s>", "<|EOT|>"]'
+
+      ### Role-specific LLM/VLM overrides: EXTRACT, KEYWORD, QUERY, VLM (If unset, each role falls back to gloabal LLM)
+      # LLM's output size per chunk - Entity extraction can sometimes enter an infinite loop or hallucinate massive arrays if the LLM gets confused by a weird document format. Cap the maximum outputs per chunk to prevent infinite generation loops during long runs:
+      - MAX_EXTRACTION_RECORDS=50
+      - MAX_EXTRACTION_ENTITIES=20
+
+      - KEYWORD_LLM_MODEL=${LIGHTRAG_LLM}
+      - KEYWORD_MAX_ASYNC_LLM=1
+      #- KEYWORD_BINDING_HOST:
+      - KEYWORD_LLM_TIMEOUT=6000
+
+      - QUERY_LLM_MODEL=${LIGHTRAG_LLM}
+      - QUERY_MAX_ASYNC_LLM=1
+      #- QUERY_BINDING_HOST:
+      - QUERY_LLM_TIMEOUT=6000
+
+      - VLM_PROCESS_ENABLE=true # When false, multimodal item is skipped regardless of document process_options - When true, VLM_LLM_BINDING (or the base LLM_BINDING) must be vision-capable
+      - VLM_LLM_MODEL=${LIGHTRAG_VLM}
+      - VLM_MAX_ASYNC_LLM=1
+      #- VLM_LLM_BINDING_HOST:
+      - VLM_LLM_TIMEOUT=6000
+      #- VLM_MAX_IMAGE_BYTES=5242880 # Maximum image bytes sent to VLM (5242880=5MB)
+
+      ### Embedding Configuration (Should not be changed after the first file processed)
+      - EMBEDDING_MODEL=bge-m3:latest
+      #- EMBEDDING_FUNC_MAX_ASYNC=8 # Max concurrency requests for Embedding
+      #- EMBEDDING_BINDING_HOST:
+      - EMBEDDING_TIMEOUT=6000
+      - EMBEDDING_DIM=1024
+      #- EMBEDDING_BATCH_NUM=10 # Num of chunks send to Embedding in single request
+      - OLLAMA_EMBEDDING_NUM_CTX=8192 # Ollama should set num_ctx option in addition to EMBEDDING_TOKEN_LIMIT
+
+      ### --- Advanced Data Chunking (Applied at Ingestion) ---
+      # Query Configuration - MAX_ENTITY_TOKENS + MAX_RELATION_TOKENS < MAX_TOTAL_TOKENS, Chunk_Tokens = MAX_TOTAL_TOKENS - Actual_Entity_Tokens - Actual_Relation_Tokens
+      - CHUNK_SIZE=800 # Controls how large each text block is when sliced (Default is 1200)
+      - CHUNK_OVERLAP_SIZE=100
+      - MAX_GRAPH_NODES=10000
+      - ENTITY_EXTRACTION_USE_JSON=true
+      - ENABLE_LLM_CACHE=true # LLM response cache for query (Not valid for streaming response)
+      - MAX_ENTITY_TOKENS=4000 # control the actual entities send to LLM
+      - MAX_RELATION_TOKENS=6000 # control the actual relations send to LLM
+      - MAX_TOTAL_TOKENS=14000 # control the maximum tokens send to LLM (include entities, relations and chunks)
+      #- COSINE_THRESHOLD=0.2
+      #- TOP_K=40 # Number of entities or relations retrieved from KG
+      #- CHUNK_TOP_K=20 # Maximum number or chunks for naive vector search
+      #- RELATED_CHUNK_NUMBER=5 # maximum number of related chunks per source entity or relation - Higher values increase re-ranking time
+      #- FORCE_LLM_SUMMARY_ON_MERGE=8 # Number of summary segments or tokens to trigger LLM summary on entity/relation merge (at least 3 is recommended)
+      #- SUMMARY_MAX_TOKENS=1200 # Max description token size to trigger LLM summary
+      #- SUMMARY_LENGTH_RECOMMENDED=600 # Recommended LLM summary output length in tokens
+      #- SUMMARY_CONTEXT_SIZE=12000 # Maximum context size sent to LLM for description summary
+      #- MAX_SOURCE_IDS_PER_ENTITY=200 # control the maximum chunk_ids stored in vector and graph db
+      #- MAX_SOURCE_IDS_PER_RELATION=200
+      #- SOURCE_IDS_LIMIT_METHOD=KEEP # control chunk_ids limitation method: FIFO, KEEP (Keep oldest (less merge action and faster))
+      #- MAX_FILE_PATHS=75 # Maximum number of file paths stored in entity/relation file_path field - For displayed only, does not affect query performance
+      #- PDF_DECRYPT_PASSWORD=your_pdf_password_here # PDF decryption password for protected PDF files
+
+      ### Pipeline Concurrency Configuration - Number of parallel processing documents
+      - MAX_PARALLEL_INSERT=1
+      ### Optional per-stage document pipeline concurrency
+      #- MAX_PARALLEL_PARSE_NATIVE=5
+      #- MAX_PARALLEL_ANALYZE=5
+      ### Optional queue sizes for staged pipeline workers
+      #- QUEUE_SIZE_PARSE=20
+      #- QUEUE_SIZE_ANALYZE=100
+      #- QUEUE_SIZE_INSERT=4
+
+      ### Rerank
+      - MIN_RERANK_SCORE=0.35 # rerank score chunk filter(set to 0.0 to keep all chunks, 0.6 or above if LLM is not strong enough)
+      - RERANK_BY_DEFAULT=True
+      - RERANK_BINDING=cohere
+      - RERANK_MODEL=mixedbread-ai/mxbai-rerank-xsmall-v1 #michaelfeil/bge-small-en-v1.5   #qllama/bge-reranker-v2-m3
+      - RERANK_BINDING_HOST=http://192.168.1.193:7997/rerank
+#      - RERANK_BINDING_API_KEY=3f5abc937e4263cdefc4f77df4cb0c37
+      - MAX_ASYNC_RERANK=4 # MAX_ASYNC_RERANK falls back to MAX_ASYNC_LLM when unset.
+      - RERANK_TIMEOUT=600 # has its own default (30s) since reranker calls are typically much shorter than full LLM generation.
+
+      ### Login and API-Key Configuration
+      #- LIGHTRAG_API_KEY=your-secure-api-key-here # API-Key to access LightRAG Server API - Use this key in HTTP requests with the 'X-API-Key' header
+      #- AUTH_ACCOUNTS='admin:admin123,user1:{bcrypt}$2b$12$S8Yu.gCbuAbNTJFB.231gegTwr5pgrFxc8H9kXQ4/sduFBHkhM8Ka'
+      #- TOKEN_SECRET=lightrag-jwt-default-secret-key!
+      #- JWT_ALGORITHM=HS256
+      #- TOKEN_EXPIRE_HOURS=48
+      #- TOKEN_AUTO_RENEW=true # Token Auto-Renewal Configuration - Enable to prevent active users from being logged out
+      #- TOKEN_RENEW_THRESHOLD=0.5 # Token renewal threshold (0.0 - 1.0) Renew token when remaining time < (total time * threshold)
+
+      ### Logging level
+      - LOG_LEVEL=INFO
+      - VERBOSE=True
+      - LOG_MAX_BYTES=10485760
+      - LOG_BACKUP_COUNT=5
+      - LIGHTRAG_PERFORMANCE_TIMING_LOGS=true
+    restart: unless-stopped
